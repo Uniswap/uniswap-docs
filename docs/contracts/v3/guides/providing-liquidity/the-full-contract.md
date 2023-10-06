@@ -11,12 +11,10 @@ Below we have the complete functioning code example: a contract that can custody
 pragma solidity =0.7.6;
 pragma abicoder v2;
 
-import '@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol';
 import '@uniswap/v3-core/contracts/libraries/TickMath.sol';
 import '@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol';
-import '../libraries/TransferHelper.sol';
-import '../interfaces/INonfungiblePositionManager.sol';
-import '../base/LiquidityManagement.sol';
+import '@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol';
+import '@uniswap/v3-periphery/contracts/interfaces/INonfungiblePositionManager.sol';
 
 contract LiquidityExamples is IERC721Receiver {
     address public constant DAI = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
@@ -137,7 +135,7 @@ contract LiquidityExamples is IERC721Receiver {
     function collectAllFees(uint256 tokenId) external returns (uint256 amount0, uint256 amount1) {
         // Caller must own the ERC721 position, meaning it must be a deposit
 
-        // set amount0Max and amount1Max to uint256.max to collect all fees
+        // set amount0Max and amount1Max to type (uint128).max to collect all fees
         // alternatively can set recipient to msg.sender and avoid another transaction in `sendToOwner`
         INonfungiblePositionManager.CollectParams memory params =
             INonfungiblePositionManager.CollectParams({
@@ -149,7 +147,7 @@ contract LiquidityExamples is IERC721Receiver {
 
         (amount0, amount1) = nonfungiblePositionManager.collect(params);
 
-        // send collected feed back to owner
+        // send collected fees back to owner
         _sendToOwner(tokenId, amount0, amount1);
     }
 
@@ -177,7 +175,7 @@ contract LiquidityExamples is IERC721Receiver {
 
         (amount0, amount1) = nonfungiblePositionManager.decreaseLiquidity(params);
 
-        //send liquidity back to owner
+        // send liquidity back to owner
         _sendToOwner(tokenId, amount0, amount1);
     }
 
@@ -241,10 +239,10 @@ contract LiquidityExamples is IERC721Receiver {
     function retrieveNFT(uint256 tokenId) external {
         // must be the owner of the NFT
         require(msg.sender == deposits[tokenId].owner, 'Not the owner');
-        // transfer ownership to original owner
-        nonfungiblePositionManager.safeTransferFrom(address(this), msg.sender, tokenId);
         //remove information related to tokenId
         delete deposits[tokenId];
+        // transfer ownership to original owner
+        nonfungiblePositionManager.safeTransferFrom(address(this), msg.sender, tokenId);
     }
 }
 ```
