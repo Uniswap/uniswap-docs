@@ -18,7 +18,7 @@ In this example we will trade between two ERC20 tokens: **WETH and USDC**. The t
 The guide will **cover**:
 
 1. Constructing a route from pool information
-2. Constructing an unchecked trade
+2. Fetching a Quote for the route
 3. Executing a trade
 
 At the end of the guide, we should be able to create and execute a trade between any two ERC20 tokens using the example's included UI.
@@ -27,10 +27,16 @@ At the end of the guide, we should be able to create and execute a trade between
 Included in the example application is functionality to wrap/unwrap ETH as needed to fund the example `WETH` to `USDC` swap directly from an `ETH` balance.
 :::
 
+:::info
+The SDKs that are used in the guide are now published by the [Uniswap Foundation](https://github.com/uniswapfoundation) instead of Uniswap Labs.
+You can find a list of supported SDKs [here](https://www.npmjs.com/org/uniswapfoundation).
+Make sure you don't mix SDKs published by Uniswap Labs and the Uniswap Foundation to avoid unpredictable behavior.
+:::
+
 For this guide, the following Uniswap packages are used:
 
-- [`@uniswap/v3-sdk`](https://www.npmjs.com/package/@uniswap/v3-sdk)
-- [`@uniswap/sdk-core`](https://www.npmjs.com/package/@uniswap/sdk-core)
+- [`@uniswapfoundation/v3-sdk`](https://www.npmjs.com/package/@uniswapfoundation/v3-sdk)
+- [`@uniswapfoundation/sdk-core`](https://www.npmjs.com/package/@uniswapfoundation/sdk-core)
 
 The core code of this guide can be found in [`trading.ts`](https://github.com/Uniswap/examples/blob/main/v3-sdk/trading/src/libs/trading.ts)
 
@@ -108,52 +114,29 @@ If you cannot see the Tokens traded in your wallet, you possibly have to [import
 
 ## Constructing a route from pool information
 
-To construct our trade, we will first create an model instance of a `Pool`. We create an **ethers** contract like in the [previous guide](./01-quoting.md#referencing-the-pool-contract-and-fetching-metadata).
-We will first extract the needed metadata from the relevant pool contract. Metadata includes both constant information about the pool as well as information about its current state stored in its first slot:
+To construct our trade, we will first create a model instance of a `Pool`. We create an **ethers** provider like in the [previous guide](./01-quoting.md).
+The sdk has a utility function to create a Pool from onchain data:
 
 ```typescript
-async function getPoolInfo() {
-    const [token0, token1, fee, liquidity, slot0] =
-    await Promise.all([
-        poolContract.fee(),
-        poolContract.liquidity(),
-        poolContract.slot0(),
-    ])
+  import {Pool} from '@uniswapfoundation/v3-sdk'
+  import ethers from 'ethers'
 
-    return {
-        fee,
-        liquidity,
-        sqrtPriceX96: slot0[0],
-        tick: slot0[1],
-    } 
-}
+  const provider = new ethers.providers.JsonRpcProvider(CurrentConfig.rpc.mainnet)
+
+  const pool = await Pool.initFromChain(
+    provider,
+    CurrentConfig.tokens.in,
+    CurrentConfig.tokens.out,
+    CurrentConfig.tokens.poolFee
+  )
 ```
 
-Before continuing, let's talk about the values we fetched here and what they represent:
-
-- `fee` is the fee that is taken from every swap that is executed on the pool in 1 per million - if the `fee` value of a pool is 500, ```500/ 1000000``` (or 0.05%) of the trade amount is taken as a fee. This fee goes to the liquidity providers of the Pool.
-- `liquidity` is the amount of liquidity the Pool can use for trades at the current price.
-- `sqrtPriceX96` is the current Price of the pool, encoded as a ratio between `token0` and `token1`.
-- `tick` is the tick at the current price of the pool.
-
-Check out the [whitepaper](https://uniswap.org/whitepaper-v3.pdf) to learn more on how liquidity and ticks work in Uniswap V3.
+Every Pool is uniquely identified by the two tokens it contains and its fee.
+The initialized Pool already has all necessary metadata for our example but does not contain any Tick Data. 
+Fetching Ticks can be expensive for large pools and is not necessary for most use cases.
+We will dive deeper into this topic in the [next guide](./03-simulate-offchain.md)
   
 You can find the full code in [`pool.ts`](https://github.com/Uniswap/examples/blob/main/v3-sdk/trading/src/libs/pool.ts).
-
-Using this metadata along with our inputs, we will then construct a `Pool`:
-
-```typescript
-const poolInfo = await getPoolInfo()
-
-const pool = new Pool(
-  CurrentConfig.tokens.in,
-  CurrentConfig.tokens.out,
-  CurrentConfig.tokens.poolFee,
-  poolInfo.sqrtPriceX96.toString(),
-  poolInfo.liquidity.toString(),
-  poolInfo.tick
-)
-```
 
 ## Creating a Route
 
@@ -176,7 +159,7 @@ The `Route` object can find this route from an array of given pools and an input
 To keep it simple for this guide, we only swap over one Pool:
 
 ```typescript
-import { Route } from '@uniswap/v3-sdk'
+import { Route } from '@uniswapfoundation/v3-sdk'
 
 const swapRoute = new Route(
   [pool],
@@ -187,7 +170,6 @@ const swapRoute = new Route(
 
 Our `Route` understands that `CurrentConfig.tokens.in` should be traded for `CurrentConfig.tokens.out` over the Array of pools `[pool]`.
 
-
 ## Constructing an unchecked trade
 
 Once we have constructed the route object, we now need to obtain a quote for the given `inputAmount` of the example:
@@ -196,60 +178,44 @@ Once we have constructed the route object, we now need to obtain a quote for the
 const amountOut = await getOutputQuote(swapRoute)
 ```
 
-As shown below, the quote is obtained using the `v3-sdk`'s `SwapQuoter`, in contrast to the [previous quoting guide](./01-quoting.md), where we directly accessed the smart contact:
+As shown below, the quote is obtained using the `v3-sdk`'s `SwapQuoter`, for this guide we use the `callQuoter()` function.
+In contrast to the `quoteExactInputSingle()` function we used in the previous guide, this function works for a Route with any number of Uniswap V3 Pools, not just a swap over a single Pool:
 
 ```typescript
-import { SwapQuoter } from '@uniswap/v3-sdk'
-import { CurrencyAmount, TradeType } from '@uniswap/sdk-core'
+import { SwapQuoter } from '@uniswapfoundation/v3-sdk'
+import { CurrencyAmount, TradeType } from '@uniswapfoundation/sdk-core'
 
-const { calldata } = await SwapQuoter.quoteCallParameters(
-  swapRoute,
-  CurrencyAmount.fromRawAmount(
-    CurrentConfig.tokens.in,
-    fromReadableAmount(
-      CurrentConfig.tokens.amountIn,
-      CurrentConfig.tokens.in.decimals
+const rawInputAmount = ethers.utils.parseUnits(
+    CurrentConfig.tokens.amountIn,
+    CurrentConfig.tokens.in.decimals
     )
-  ),
-  TradeType.EXACT_INPUT,
-  {
-    useQuoterV2: true,
-  }
+
+const currencyAmountIn = CurrencyAmount.fromRawAmount(
+  CurrentConfig.tokens.tokenIn,
+  rawInputAmount
 )
-```
 
-The `SwapQuoter`'s `quoteCallParameters` function, gives us the calldata needed to make the call to the `Quoter`, and we then decode the returned quote:
-
-```typescript
-const quoteCallReturnData = await provider.call({
-  to: QUOTER_CONTRACT_ADDRESS,
-  data: calldata,
+const expectedOutput = await SwapQuoter.callQuoter({
+  route: swapRoute,
+  amount: currencyAmountIn,
+  tradeType: TradeType.EXACT_INPUT,
+  provider
 })
-
-return ethers.utils.defaultAbiCoder.decode(['uint256'], quoteCallReturnData)
 ```
+
+We construct the input the same way we did in the previous guide.
+The return value of the `callQuoter()` function is the expected output, parsed as a `CurrencyAmount` object.
 
 With the quote and the route, we can now construct a trade using the route in addition to the output amount from a quote based on our input.
 Because we already know the expected output of our Trade, we do not have to check it again. We can use the `uncheckedTrade` function to create our Trade:
 
 ```typescript
-import { Trade } from 'uniswap/v3-sdk'
-import { CurrencyAmount, TradeType } from '@uniswap/sdk-core'
-import JSBI from 'jsbi'
+import { Trade } from '@uniswapfoundation/v3-sdk'
 
 const uncheckedTrade = Trade.createUncheckedTrade({
   route: swapRoute,
-  inputAmount: CurrencyAmount.fromRawAmount(
-    CurrentConfig.tokens.in,
-    fromReadableAmount(
-      CurrentConfig.tokens.amountIn,
-      CurrentConfig.tokens.in.decimals
-    )
-  ),
-  outputAmount: CurrencyAmount.fromRawAmount(
-    CurrentConfig.tokens.out,
-    JSBI.BigInt(amountOut)
-  ),
+  inputAmount: currencyAmountIn,
+  outputAmount: expectedOutput,
   tradeType: TradeType.EXACT_INPUT,
 })
 ```
@@ -258,55 +224,52 @@ This example uses an exact input trade, but we can also construct a trade using 
 
 ## Executing a trade
 
-Once we have created a trade, we can now execute this trade with our provider. First, we must give the `SwapRouter` approval to spend our tokens for us:
+Once we have created a trade, we can now execute this trade with our provider.
+We will use the `executeTrade()` function of the `SwapRouter` class.
+First we specify the deadline and the slippage tolerance we are willing to accept for our trade:
 
 ```typescript
-const tokenApproval = await getTokenTransferApproval(CurrentConfig.tokens.in)
-```
+import { SwapOptions } frpm '@uniswapfoundation/v3-sdk'
+import { Percent } from '@uniswapfoundation/sdk-core'
 
-You can find the approval function [here](https://github.com/Uniswap/examples/blob/main/v3-sdk/trading/src/libs/trading.ts#L151). 
-We will use this function or similar implementations in most guides.
-
-Then, we set our options that define how much time and slippage can occur in our execution as well as the address to use for our wallet:
-
-```typescript
-import { SwapOptions } from '@uniswap/v3-sdk'
-import { Percent } from '@uniswap/sdk-core'
-
-const options: SwapOptions = {
-  slippageTolerance: new Percent(50, 10_000), // 50 bips, or 0.50%
-  deadline: Math.floor(Date.now() / 1000) + 60 * 20, // 20 minutes from the current Unix time
-  recipient: walletAddress,
-}
+const swapOptions: SwapOptions = {
+        slippageTolerance: new Percent(50, 10_000),
+        deadline: Math.floor(Date.now() / 1000) + 60 * 5, // 5 minutes from the current Unix time
+        recipient: walletAddress,
+      }
 ```
 
 The slippage of our trade is the maximum decrease from our calculated output amount that we are willing to accept for this trade.
-The deadline is the latest point in time when we want the transaction to go through. 
+The deadline is the latest point in time when we want the transaction to go through.
 If we set this value too high, the transaction could be left waiting for days and we would need to pay gas fees to cancel it.
+The swapOptions are an optional parameter of the `executeTrade()` function and default to exactly what we specified here if they are not provided.
 
-Next, we use the `SwapRouter` class, a representation of the Uniswap [SwapRouter Contract](https://github.com/Uniswap/v3-periphery/blob/v1.0.0/contracts/SwapRouter.sol), to get the associated call parameters for our trade and options:
-
-```typescript
-import { SwapRouter } from '@uniswap/v3-sdk'
-
-const methodParameters = SwapRouter.swapCallParameters([uncheckedTrade], options)
-```
-
-Finally, we can construct a transaction from the method parameters and send the transaction:
+As we want to execute a state changing transaction on the blockchain, we need a wallet to sign our transaction:
 
 ```typescript
-const tx = {
-  data: methodParameters.calldata,
-  to: SWAP_ROUTER_ADDRESS,
-  value: methodParameters.value,
-  from: walletAddress,
-  maxFeePerGas: MAX_FEE_PER_GAS,
-  maxPriorityFeePerGas: MAX_PRIORITY_FEE_PER_GAS,
-}
+import { ethers } from 'ethers'
 
-const res = await wallet.sendTransaction(tx)
+const wallet = getWallet()
+wallet.connect(provider)
 ```
+
+We are now ready to execute our trade:
+
+```typescript
+import { SwapRouter } from '@uniswapfoundation/v3-sdk'
+
+const txResponse = await SwapRouter.executeTrade({
+  trades: [uncheckedTrade],
+  options: swapOptions,
+  signer: wallet
+})
+```
+
+The function automatically checks if the necessary token transfer approvals exist and creates them if not.
+For this reason, we usually need to wait 2 blocks for the execution to finish.
+The return value is an `ethers.TransactionResponse` object.
 
 ## Next Steps
 
-The resulting example allows for trading between any two ERC20 tokens, but this can be suboptimal for the best pricing and fees. To achieve the best possible price, we use the Uniswap auto router to route through pools to get an optimal cost. Our [routing](./03-routing.md) guide will show you how to use this router and execute optimal swaps.
+So far, we have used onchain calls to get a quote for our trades.
+In the next guide on [offchain simulations](03-simulate-offchain.md), we will use the sdk to fetch Tickdata first and simulate our Trades offchain.

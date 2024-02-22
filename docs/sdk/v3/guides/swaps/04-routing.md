@@ -21,18 +21,24 @@ The guide will **cover**:
 
 At the end of the guide, we should be able to create a route and and execute a swap between any two currencies tokens using the example's included UI.
 
+:::info
+The SDKs that are used in the guide are now published by the [Uniswap Foundation](https://github.com/uniswapfoundation) instead of Uniswap Labs.
+You can find a list of supported SDKs [here](https://www.npmjs.com/org/uniswapfoundation).
+Make sure you don't mix SDKs published by Uniswap Labs and the Uniswap Foundation to avoid unpredictable behavior.
+:::
+
 For this guide, the following Uniswap packages are used:
 
-- [`@uniswap/v3-sdk`](https://www.npmjs.com/package/@uniswap/v3-sdk)
-- [`@uniswap/sdk-core`](https://www.npmjs.com/package/@uniswap/sdk-core)
-- [`@uniswap/smart-order-router`](https://www.npmjs.com/package/@uniswap/smart-order-router)
+- [`@uniswapfoundation/v3-sdk`](https://www.npmjs.com/package/@uniswapfoundation/v3-sdk)
+- [`@uniswapfoundation/sdk-core`](https://www.npmjs.com/package/@uniswapfoundation/sdk-core)
+- [`@uniswapfoundation/smart-order-router`](https://www.npmjs.com/package/@uniswapfoundation/smart-order-router)
 
 The core code of this guide can be found in [`routing.ts`](https://github.com/Uniswap/examples/blob/main/v3-sdk/routing/src/libs/routing.ts)
 
 The config, which we will use in some code snippets in this guides has this structure:
 
 ```typescript
-import { Token } from '@uniswap/sdk-core'
+import { Token } from '@uniswapfoundation/sdk-core'
 
 interface ExampleConfig {
   env: Environment
@@ -56,10 +62,10 @@ export const CurrentConfig: ExampleConfig = {...}
 
 ## Creating a router instance
 
-To compute our route, we will use the `@uniswap/smart-order-router` package, specifically the `AlphaRouter` class which requires a `chainId` and a `provider`. Note that routing is not supported for local forks, so we will use a mainnet provider even when swapping on a local fork:
+To compute our route, we will use the `@uniswapfoundation/smart-order-router` package, specifically the `AlphaRouter` class which requires a `chainId` and a `provider`. Note that routing is not supported for local forks, so we will use a mainnet provider even when swapping on a local fork:
 
 ```typescript
-import { AlphaRouter, ChainId } from '@uniswap/smart-order-router'
+import { AlphaRouter, ChainId } from '@uniswapfoundation/smart-order-router'
 
 const provider = new ethers.providers.JsonRpcProvider(rpcUrl)
 
@@ -71,12 +77,14 @@ const router = new AlphaRouter({
 
 ## Creating a route
 
-We will use the [SwapRouter02](https://github.com/Uniswap/v3-periphery/blob/v1.0.0/contracts/SwapRouter.sol) for our trade.
-The `smart-order-router` package provides us with a SwapOptionsSwapRouter02` interface, defining the wallet to use, slippage tolerance, and deadline for the transaction that we need to interact with the contract:
+We will use the [SwapRouter02](https://github.com/Uniswap/swap-router-contracts/blob/main/contracts/SwapRouter02.sol) for our trade.
+This is a different SwapRouter contract than the one we used in the previous example.
+In contrast to the contract we used previously, this on can execute swaps on both V3 Pools and V2 Pairs.
+The `smart-order-router` package provides us with a `SwapOptionsSwapRouter02` interface, defining the wallet to use, slippage tolerance, and deadline for the transaction that we need to interact with the contract:
 
 ```typescript
-import { SwapOptionsSwapRouter02, SwapType } from '@uniswap/smart-order-router'
-import { Percent } from '@uniswap/sdk-core'
+import { SwapOptionsSwapRouter02, SwapType } from '@uniswapfoundation/smart-order-router'
+import { Percent } from '@uniswapfoundation/sdk-core'
 
 const options: SwapOptionsSwapRouter02 = {
   recipient: CurrentConfig.wallet.address,
@@ -86,43 +94,28 @@ const options: SwapOptionsSwapRouter02 = {
 }
 ```
 
-Like explained in the [previous guide](./02-trading.md#executing-a-trade), it is important to set the parameters to sensible values.
+Like explained in the [trading guide](./02-trading.md#executing-a-trade), it is important to set the parameters to sensible values.
 
 Using these options, we can now create a trade (`TradeType.EXACT_INPUT` or `TradeType.EXACT_OUTPUT`) with the currency and the input amount to use to get a quote. For this example, we'll use an `EXACT_INPUT` trade to get a quote outputted in the quote currency.
 
 ```typescript
-import { CurrencyAmount, TradeType } from '@uniswap/sdk-core'
+import { CurrencyAmount, TradeType } from '@uniswapfoundation/sdk-core'
 
-const rawTokenAmountIn: JSBI = fromReadableAmount(
+const rawTokenAmountIn = fromReadableAmount(
       CurrentConfig.currencies.amountIn,
       CurrentConfig.currencies.in.decimals
     )
-
-const route = await router.route(
-  CurrencyAmount.fromRawAmount(
+  const currencyAmountIn = CurrencyAmount.fromRawAmount(
     CurrentConfig.currencies.in,
     rawTokenAmountIn
-  ),
+  )
+
+const route = await router.route(
+  currencyAmountIn,
   CurrentConfig.currencies.out,
   TradeType.EXACT_INPUT,
   options
 )
-```
-
-The `fromReadableAmount` function calculates the amount of tokens in the Token's smallest unit from the full unit and the Token's decimals:
-
-```typescript title="src/libs/conversion.ts"
-export function fromReadableAmount(amount: number, decimals: number): JSBI {
-  const extraDigits = Math.pow(10, countDecimals(amount))
-  const adjustedAmount = amount * extraDigits
-  return JSBI.divide(
-    JSBI.multiply(
-      JSBI.BigInt(adjustedAmount),
-      JSBI.exponentiate(JSBI.BigInt(10), JSBI.BigInt(decimals))
-    ),
-    JSBI.BigInt(extraDigits)
-  )
-}
 ```
 
 `route` and `route.methodParameters` are *optional* as the request can fail, for example if **no route exists** between the two Tokens or because of networking issues.
@@ -138,7 +131,7 @@ Depending on our preferences and reason for the issue we could retry the request
 
 ## Swapping using a route
 
-First, we need to give approval to the `SwapRouter` smart contract to spend our tokens for us:
+First, we need to give approval to the `SwapRouter02` smart contract to spend our tokens for us:
 
 ```typescript
 import { ethers } from 'ethers'
@@ -159,7 +152,7 @@ const tokenApproval = await tokenContract.approve(
 To be able to spend the tokens of a wallet, a smart contract first needs to get an approval from that wallet. 
 ERC20 tokens have an `approve` function that accepts the address of the smart contract that we want to allow spending our tokens and the amount the smart contract should be allowed to spend.
 
-We can get the **V3_SWAP_ROUTER_ADDRESS** for our chain from [Github](https://github.com/Uniswap/v3-periphery/blob/main/deploys.md). 
+We can get the **V3_SWAP_ROUTER_ADDRESS** for our chain from [Github](https://github.com/Uniswap/v3-periphery/blob/main/deploys.md).
 Keep in mind that different chains might have **different deployment addresses** for the same contracts.
 The deployment address for local forks of a network are the same as in the network you forked, so for a **fork of mainnet** it would be the address for **Mainnet**.
 

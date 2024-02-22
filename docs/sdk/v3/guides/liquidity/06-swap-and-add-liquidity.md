@@ -24,11 +24,17 @@ The guide will **cover**:
 
 At the end of the guide, given the inputs above, we should be able swap-and-add liquidity using 100% of the input assets with the press of a button and see the change reflected in our position and the balance of our tokens.
 
+:::info
+The SDKs that are used in the guide are now published by the [Uniswap Foundation](https://github.com/uniswapfoundation) instead of Uniswap Labs.
+You can find a list of supported SDKs [here](https://www.npmjs.com/org/uniswapfoundation).
+Make sure you don't mix SDKs published by Uniswap Labs and the Uniswap Foundation to avoid unpredictable behavior.
+:::
+
 For this guide, the following Uniswap packages are used:
 
-- [`@uniswap/v3-sdk`](https://www.npmjs.com/package/@uniswap/v3-sdk)
-- [`@uniswap/sdk-core`](https://www.npmjs.com/package/@uniswap/sdk-core)
-- [`@uniswap/smart-order-router`](https://www.npmjs.com/package/@uniswap/smart-order-router)
+- [`@uniswapfoundation/v3-sdk`](https://www.npmjs.com/package/@uniswapfoundation/v3-sdk)
+- [`@uniswapfoundation/sdk-core`](https://www.npmjs.com/package/@uniswapfoundation/sdk-core)
+- [`@uniswapfoundation/smart-order-router`](https://www.npmjs.com/package/@uniswapfoundation/smart-order-router)
 
 The core code of this guide can be found in [`swapAndAddLiquidity()`](https://github.com/Uniswap/examples/blob/main/v3-sdk/swap-and-add-liquidity/src/libs/liquidity.ts#L48).
 
@@ -43,24 +49,30 @@ Also note that we do not need to give approval to the `NonfungiblePositionManage
 The first step is to approve the `SwapRouter` smart contract to spend our tokens for us in order for us to add liquidity to our position:
 
 ```typescript
-const tokenInApproval = await getTokenTransferApproval(
-  token0,
-  V3_SWAP_ROUTER_ADDRESS
-)
+// Give approval to the router contract to transfer tokens
+  const tokenInApproval = await approveTokenTransfer({
+    contractAddress: V3_SWAP_ROUTER_ADDRESS,
+    tokenAddress: CurrentConfig.tokens.token0.address,
+    amount: TOKEN_AMOUNT_TO_APPROVE_FOR_TRANSFER,
+    signer: getWallet(),
+  })
 
-const tokenOutApproval = await getTokenTransferApproval(
-  token1,
-  V3_SWAP_ROUTER_ADDRESS
-)
+  const tokenOutApproval = await approveTokenTransfer({
+    contractAddress: V3_SWAP_ROUTER_ADDRESS,
+    tokenAddress: CurrentConfig.tokens.token1.address,
+    amount: TOKEN_AMOUNT_TO_APPROVE_FOR_TRANSFER,
+    signer: getWallet(),
+  })
 ```
 
 We described the `getTokenTransferApproval` function [here](./02-minting-position.md#giving-approval-to-transfer-our-tokens).
+We defined the address for the swaprouter in our `constants.ts` file.
 
-Then we can setup our router, the [`AlphaRouter`](https://github.com/Uniswap/smart-order-router/blob/97c1bb7cb64b22ebf3509acda8de60c0445cf250/src/routers/alpha-router/alpha-router.ts#L333), which is part of the [smart-order-router package](https://www.npmjs.com/package/@uniswap/smart-order-router). The router requires a `chainId` and a `provider` to be initialized. Note that routing is not supported for local forks, so we will use a mainnet provider even when swapping on a local fork:
+Then we can setup our router, the [`AlphaRouter`](https://github.com/Uniswap/smart-order-router/blob/97c1bb7cb64b22ebf3509acda8de60c0445cf250/src/routers/alpha-router/alpha-router.ts#L333), which is part of the [smart-order-router package](https://www.npmjs.com/package/@uniswapfoundation/smart-order-router). The router requires a `chainId` and a `provider` to be initialized. Note that routing is not supported for local forks, so we will use a mainnet provider even when swapping on a local fork:
 
 ```typescript
 import { ethers } from 'ethers'
-import { AlphaRouter } from '@uniswap/smart-order-router'
+import { AlphaRouter } from '@uniswapfoundation/smart-order-router'
 
 const provider = new ethers.providers.JsonRpcProvider(rpcUrl)
 
@@ -76,7 +88,7 @@ Having created the router, we now need to construct the parameters required to m
 The first two parameters are the currency amounts we use as input to the `routeToRatio` algorithm:
 
 ```typescript
-import { CurrencyAmount } from '@uniswap/sdk-core'
+import { CurrencyAmount } from '@uniswapfoundation/sdk-core'
 
 const token0CurrencyAmount = CurrencyAmount.fromRawAmount(
   token0,
@@ -98,7 +110,7 @@ const token1CurrencyAmount = CurrencyAmount.fromRawAmount(
 Next, we will create a placeholder position with a liquidity of `1` since liquidity is still unknown and will be set inside the call to `routeToRatio`:
 
 ```typescript
-import { Pool, Position, nearestUsableTick } from '@uniswap/v3-sdk'
+import { Pool, Position, nearestUsableTick } from '@uniswapfoundation/v3-sdk'
 
 const placeholderPosition = new Position{
     pool,
@@ -118,8 +130,8 @@ We then need to create an instance of `SwapAndAddConfig` which will set addition
 - `maxIterations` determines the maximum times the algorithm will iterate to find a ratio within error tolerance. If max iterations is exceeded, an error is returned. The benefit of running the algorithm more times is that we have more chances to find a route, but more iterations will longer to execute. We've used a default of 6 in our example.
 
 ```typescript
-import { Fraction } from '@uniswap/sdk-core'
-import { SwapAndAddConfig } from '@uniswap/smart-order-router'
+import { Fraction } from '@uniswapfoundation/sdk-core'
+import { SwapAndAddConfig } from '@uniswapfoundation/smart-order-router'
 
 const swapAndAddConfig: SwapAndAddConfig = {
   ratioErrorTolerance: new Fraction(1, 100),
@@ -133,7 +145,7 @@ Finally, we will create an instance of `SwapAndAddOptions` to configure which po
 - **`addLiquidityOptions`** must contain a `tokenId` to add to an existing position
 
 ```typescript
-import { SwapAndAddOptions } from '@uniswap/smart-order-router'
+import { SwapAndAddOptions } from '@uniswapfoundation/smart-order-router'
 
 const swapAndAddOptions: SwapAndAddOptions = {
   swapOptions: {
@@ -153,7 +165,7 @@ const swapAndAddOptions: SwapAndAddOptions = {
 Having constructed all the parameters we need to call `routeToRatio`, we can now make the call to the function:
 
 ```typescript
-import { SwapToRatioResponse } from '@uniswap/smart-order-router'
+import { SwapToRatioResponse } from '@uniswapfoundation/smart-order-router'
 
 const routeToRatioResponse: SwapToRatioResponse = await router.routeToRatio(
   token0CurrencyAmount,
@@ -167,7 +179,7 @@ const routeToRatioResponse: SwapToRatioResponse = await router.routeToRatio(
 The return type of the function call is [SwapToRatioResponse](https://github.com/Uniswap/smart-order-router/blob/97c1bb7cb64b22ebf3509acda8de60c0445cf250/src/routers/router.ts#L121). If a route was found successfully, this object will have two fields: the status (success) and the `SwapToRatioRoute` object. We check to make sure that both of those conditions hold true before we construct and submit the transaction:
 
 ```typescript
-import { SwapToRatioStatus } from '@uniswap/smart-order-router'
+import { SwapToRatioStatus } from '@uniswapfoundation/smart-order-router'
 
 if (
   !routeToRatioResponse ||
@@ -184,7 +196,7 @@ In case a route was not found, we return from the function a `Failed` state for 
 After making sure that a route was successfully found, we can now construct and send the transaction. The response (`SwapToRatioRoute`) will have the properties we need to construct our transaction object:
 
 ```typescript
-import { SwapToRatioRoute } from '@uniswap/smart-order-router'
+import { SwapToRatioRoute } from '@uniswapfoundation/smart-order-router'
 
 const route: SwapToRatioRoute = routeToRatioResponse.result
 const transaction = {
