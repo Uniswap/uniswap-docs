@@ -61,7 +61,7 @@ export const developerLinks = [
   },
   {
     title: 'Deployment addresses',
-    href: 'http://localhost:3000/contracts/v4/deployments',
+    href: '/contracts/v4/deployments',
     icon: GitHub,
   },
   /*
